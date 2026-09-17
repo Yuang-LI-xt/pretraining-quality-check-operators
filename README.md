@@ -1,48 +1,36 @@
-# Quality Checks 交接包（面向 V7，当前基线 V6.0）
+# Pretraining Quality Check Operators
 
-用于 pretraining 数据质量检查、清洗和重复检测的算子集合。当前可运行基线为 V6.0，仓库同时保留了继续开发 V7 所需的交接文档与验证记录。
+面向大模型预训练数据的文本质量检查与清洗算子集合。项目提供可审计的局部清洗、质量检测、批量处理和 HTTP API，适用于 JSONL、XLSX 及 Python 数据处理流程。
 
-打包日期：2026-08-30
+当前稳定实现位于 `quality_checks_V6/`，版本为 `v6.0`。
 
-这是给下一位维护者和 Codex 使用的内部交接包。包内可直接运行的代码是
-`quality_checks_V6`，不是已经完成的 V7；`continuous_dedup_mapper_v7.py`
-中的 `v7` 只是历史文件名。V7 需要在 V6 基线上单独建立和验证。
+## 主要能力
 
-## 先读什么
+- 清理异常 Unicode 字符、不可见控制字符、HTML 残留和训练特殊 token；
+- 规范异常空格、换行、HTML 实体和数学样式字符；
+- 检测乱码、连续重复、token flood 和疑似重复片段；
+- 对高置信度噪声执行局部修改，不默认删除整条记录；
+- 在 `meta.cleaning_v6` 中记录规则、计数和原文位置，便于审计；
+- 支持单进程和多进程批量处理、Python API 及 HTTP API。
 
-1. `docs/QUALITY_CHECKS_V7_HANDOFF.md`：短版背景、接手顺序和 V7 任务。
-2. `docs/QUALITY_CHECKS_CASES_AND_OPERATORS.md`：完整案例、阈值和算子说明。
-3. `QUALITY_CHECKS_V7_CODEX_PROMPT.txt`：可以直接交给 Codex 的启动指令。
-4. `quality_checks_V6/README.md`：代码级使用说明。
-5. `validation/V6_800_BASELINE.md`：800 条样本的可复核统计。
+通用 dedup、复杂 mojibake、未知 PUA 和可能合法的重复内容默认只报告，不自动修改正文。
 
-## 快速验证
+## 快速开始
 
-在解压后的包根目录执行：
+安装依赖：
+
+```bash
+python3 -m pip install -r quality_checks_V6/requirements.txt
+```
+
+运行自检：
 
 ```bash
 python3 verify_handoff.py
-
 python3 -m unittest quality_checks_V6.tests.test_repeated_noise_token
-
-python3 - <<'PY'
-from pathlib import Path
-
-paths = [
-    Path("quality_checks_V6/clean_variation_chars.py"),
-    Path("quality_checks_V6/quality_api.py"),
-    Path("quality_checks_V6/run_long_dialog_quality_checks.py"),
-    Path("quality_checks_V6/mojibake_detect/detector.py"),
-    Path("quality_checks_V6/repetition_check/loop.py"),
-    Path("quality_checks_V6/text_sub_dedup/continuous_dedup_mapper_v7.py"),
-]
-for path in paths:
-    compile(path.read_text(encoding="utf-8"), str(path), "exec")
-print("syntax OK:", len(paths), "files")
-PY
 ```
 
-运行合成样例：
+使用仓库内的合成样例：
 
 ```bash
 python3 quality_checks_V6/clean_variation_chars.py \
@@ -55,111 +43,94 @@ python3 quality_checks_V6/clean_variation_chars.py \
   --summary /tmp/quality_checks_demo.summary.json
 ```
 
-## 正式使用
-
-校验包内容（在包根目录执行）：
-
-```bash
-shasum -a 256 -c SHA256SUMS.txt
-```
-
-安装依赖：
-
-```bash
-python3 -m pip install -r quality_checks_V6/requirements.txt
-```
-
-清洗 JSONL：
+## 批量清洗
 
 ```bash
 python3 quality_checks_V6/clean_variation_chars.py \
   --input /path/to/input.jsonl \
-  --output /path/to/output.v6.cleaned.jsonl \
+  --output /path/to/output.cleaned.jsonl \
   --format jsonl \
   --fields content \
   --workers 16 \
   --max-in-flight 32 \
   --add-cleaning-meta \
   --meta-detail spans \
-  --summary /path/to/output.v6.summary.json
+  --summary /path/to/output.summary.json
 ```
 
-清洗后跑 QC：
+输入与输出必须使用不同路径。处理 JSONL 时保留记录数量，只修改指定字段。XLSX 输入同样受支持，`--fields` 应填写实际表头名称，而不是 Excel 列号。
+
+## 质量检查
 
 ```bash
 python3 quality_checks_V6/run_long_dialog_quality_checks.py \
-  --input /path/to/output.v6.cleaned.jsonl \
-  --output-dir /path/to/qc.after \
+  --input /path/to/output.cleaned.jsonl \
+  --output-dir /path/to/qc-output \
   --checks all \
   --workers 2 \
   --executor thread \
   --no-passed-output \
-  --failed-records-output /path/to/qc.after/failed_records.jsonl
+  --failed-records-output /path/to/qc-output/failed_records.jsonl
 ```
 
-XLSX 清洗时，把 `--fields` 换成实际表头，例如
-`variation_context`；它按表头名称工作，不按 Excel 列号工作。
+质量检查会输出汇总和问题上下文，便于抽样复核。包含真实正文的 QC 输出不应提交到代码仓库。
 
-## API
-
-Python：
+## Python API
 
 ```python
-from quality_checks_V6 import clean_record, check_record, clean_and_check
+from quality_checks_V6 import check_record, clean_and_check, clean_record
+
+record = {"content": "example text"}
+cleaned = clean_record(record, fields=("content",))
+quality = check_record(cleaned["record"])
+result = clean_and_check(record, fields=("content",))
 ```
 
-HTTP 服务：
+更完整的参数和返回结构见 [`quality_checks_V6/README.md`](quality_checks_V6/README.md)。
+
+## HTTP API
 
 ```bash
 python3 quality_checks_V6/quality_api.py --host 127.0.0.1 --port 8000
 ```
 
-端点为 `/health`、`/v1/rules`、`/v1/clean`、`/v1/check` 和
-`/v1/clean-and-check`。服务没有认证和 TLS，不要直接暴露到公网；大文件优先
-使用 CLI。
+可用端点：`GET /health`、`GET /v1/rules`、`POST /v1/clean`、`POST /v1/check` 和 `POST /v1/clean-and-check`。
 
-## 包内结构
+服务本身不提供认证或 TLS，请勿直接暴露到公网。大文件处理优先使用 CLI。
+
+## 核心规则
+
+默认规则覆盖 variation selector、数学样式字符、异常空格、双向控制符、已知 PUA 噪声、装饰字符、emoji、不可见控制字符、HTML 实体、训练特殊 token、重复噪声 token、长十六进制串、符号洪泛以及换行规范化。
+
+规则定义、阈值和案例见 [`quality_checks_V6/OPERATORS.md`](quality_checks_V6/OPERATORS.md) 与 [`docs/QUALITY_CHECKS_CASES_AND_OPERATORS.md`](docs/QUALITY_CHECKS_CASES_AND_OPERATORS.md)。
+
+## 项目结构
 
 ```text
-quality_checks_handoff_v7_20260830/
-├── README.md
-├── PACKAGE_CONTENTS.md
-├── PACKAGE_MANIFEST.json
-├── SHA256SUMS.txt
-├── QUALITY_CHECKS_V7_CODEX_PROMPT.txt
-├── verify_handoff.py
+.
+├── quality_checks_V6/   # 清洗器、质量检查、API 和测试
+├── examples/            # 合成示例数据
+├── validation/          # 不含原文的基线统计
+├── docs/                # 规则案例与设计说明
+├── legacy_notes/        # 历史设计记录
 ├── clean_article_comment.py
-├── quality_checks_V6/
-├── docs/
-├── validation/
-├── examples/
-└── legacy_notes/
+└── verify_handoff.py
 ```
 
-## 重要边界
+## 安全边界
 
-- 不删除整条 JSONL 记录；只对指定字段做高置信度局部修改。
-- `meta.cleaning_v6` 保存清洗溯源；offset 是原始 Python Unicode 字符索引。
-- 通用 dedup、复杂 mojibake、未知 PUA 和合法重复默认只报告，不自动改正文。
-- 不按 Unicode `Mn/Mc/Me` 类别粗删，不全量删除 PUA。
-- 原始输入路径必须和输出路径不同。
-- `hex_blob` 的 64 字符规则仍可能误命中合法 hash、ID 或 URL，V7 需要优先补上下文保护。
+- 不覆盖原始输入文件；
+- 不默认删除完整 JSONL 记录；
+- 不按 Unicode 类别粗暴删除全部组合字符或 PUA；
+- 对合法 hash、ID、URL、代码、表格和多语种文本进行人工抽样复核；
+- 不在仓库中提交原始业务数据、清洗后的大文件或带正文的 QC 明细。
 
-## 数据边界
+## 验证结果
 
-本包没有包含原始 JSONL/XLSX、清洗后的大文件、QC 上下文明细、旧压缩包、
-`__pycache__`、`*.pyc` 或内部插件。完整纳入/排除说明见 `PACKAGE_CONTENTS.md`。
+仓库包含 800 条样本的 V6 基线统计。清洗前后均保持 800 条记录，详细数据见 [`validation/V6_800_BASELINE.md`](validation/V6_800_BASELINE.md)。
 
-## V7 开发起点
+可使用以下命令校验仓库文件：
 
-先冻结并重跑 V6 基线，再建立独立的 `quality_checks_V7` 目录。优先级建议是：
-
-1. 修复 repetition 可视化的绝对 offset，停止从 reason 字符串反查位置；
-2. 为 `hex_blob` 增加 hash、URL、代码和 ID 的上下文保护；
-3. 建立 strict/language-safe 等模式，重新评估 emoji、ZWJ/ZWNJ；
-4. 降低教材、歌词、表格和课堂指令的 dedup 误报；
-5. 仅在 before/after、误删样例和性能数据齐全后更新默认规则。
-
-交接时应把整个 ZIP 和同目录的 `.sha256` 文件一起交给下一位维护者；
-`QUALITY_CHECKS_V7_CODEX_PROMPT.txt` 已包含在 ZIP 内。让对方在包根目录打开
-Codex 任务并先运行上面的验证命令。
+```bash
+shasum -a 256 -c SHA256SUMS.txt
+```
