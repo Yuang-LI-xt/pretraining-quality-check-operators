@@ -1,0 +1,13 @@
+{
+  "stage": "before_cleaning",
+  "records": 800,
+  "passed": 422,
+  "failed": 378,
+  "issue_types": {
+    "mojibake": 367,
+    "sub_dedup_continuous": 16
+  },
+  "elapsed_seconds": 348.280,
+  "records_per_second": 2.297,
+  "note": "Source paths and text excerpts intentionally omitted from the shareable handoff package."
+}
