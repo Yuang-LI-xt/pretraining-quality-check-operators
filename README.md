@@ -134,3 +134,7 @@ python3 quality_checks_V6/quality_api.py --host 127.0.0.1 --port 8000
 ```bash
 shasum -a 256 -c SHA256SUMS.txt
 ```
+
+## License
+
+本项目基于 [MIT License](LICENSE) 开源。
