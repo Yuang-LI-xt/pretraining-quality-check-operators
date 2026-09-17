@@ -133,8 +133,7 @@ quality_checks_handoff_v7_20260830/
 ├── docs/
 ├── validation/
 ├── examples/
-├── legacy_notes/
-└── optional_internal_plugins/
+└── legacy_notes/
 ```
 
 ## 重要边界
@@ -146,12 +145,10 @@ quality_checks_handoff_v7_20260830/
 - 原始输入路径必须和输出路径不同。
 - `hex_blob` 的 64 字符规则仍可能误命中合法 hash、ID 或 URL，V7 需要优先补上下文保护。
 
-## 数据和内部依赖
+## 数据边界
 
 本包没有包含原始 JSONL/XLSX、清洗后的大文件、QC 上下文明细、旧压缩包、
-`__pycache__` 或 `*.pyc`。`optional_internal_plugins/` 下的两个插件依赖公司内部
-`aegis_data` 环境，不属于 V6 的默认 CLI/API 链路；如果包要发到组织外部，建议
-先删除该目录。完整纳入/排除说明见 `PACKAGE_CONTENTS.md`。
+`__pycache__`、`*.pyc` 或内部插件。完整纳入/排除说明见 `PACKAGE_CONTENTS.md`。
 
 ## V7 开发起点
 
